@@ -85,3 +85,92 @@ data "aws_subnets" "default" {
     values = [data.aws_vpc.default.id]
   }
 }
+
+# ------------------------------------------------------------------
+# RDS PostgreSQL
+# ------------------------------------------------------------------
+
+# A dedicated subnet group tells RDS which subnets (within the default
+# VPC) it's allowed to place the database into. RDS requires this even
+# for a single-AZ instance -- it's how Multi-AZ failover would work if
+# you ever enabled it later.
+resource "aws_db_subnet_group" "telemetry" {
+  name       = "${var.project_name}-db-subnet-group"
+  subnet_ids = data.aws_subnets.default.ids
+}
+
+# Security group = firewall rules for the RDS instance. Only allow
+# inbound Postgres (5432) from your own IP, not the whole internet.
+resource "aws_security_group" "rds" {
+  name        = "${var.project_name}-rds-sg"
+  description = "Allow Postgres access from a single trusted IP only"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description = "Postgres from my local machine"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.allowed_ip_cidr]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Auto-generate a strong password. Never typed, hardcoded, or logged --
+# only ever stored encrypted in Secrets Manager below.
+resource "random_password" "db_password" {
+  length  = 20
+  special = false # avoids characters that sometimes break connection strings
+}
+
+resource "aws_db_instance" "telemetry" {
+  identifier     = "${var.project_name}-postgres"
+  engine         = "postgres"
+  engine_version = "16"
+  instance_class = "db.t4g.micro" # RDS Free Tier eligible
+
+  allocated_storage = 20 # GB, Free Tier eligible
+  storage_type       = "gp3"
+  storage_encrypted  = true
+
+  db_name  = var.db_name
+  username = var.db_username
+  password = random_password.db_password.result
+
+  db_subnet_group_name  = aws_db_subnet_group.telemetry.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+  publicly_accessible    = true # restricted to your IP via the security group above
+
+  multi_az            = false # single-AZ: sufficient for a dev/assessment workload
+  skip_final_snapshot = true  # disposable project infra, no production backup needed
+  deletion_protection = false # allows `terraform destroy` to clean up when you're done
+}
+
+# ------------------------------------------------------------------
+# Secrets Manager
+# ------------------------------------------------------------------
+
+# Store DB connection details as one JSON secret. Application code
+# (ingestion, Streamlit dashboard, ML scripts) fetches this at runtime
+# via boto3 instead of ever reading a password from a config file.
+resource "aws_secretsmanager_secret" "db_credentials" {
+  name        = "${var.project_name}/db-credentials"
+  description = "PostgreSQL connection credentials for the telemetry project"
+}
+
+resource "aws_secretsmanager_secret_version" "db_credentials" {
+  secret_id = aws_secretsmanager_secret.db_credentials.id
+  secret_string = jsonencode({
+    username = var.db_username
+    password = random_password.db_password.result
+    host     = aws_db_instance.telemetry.address
+    port     = 5432
+    dbname   = var.db_name
+  })
+}

@@ -17,3 +17,18 @@ output "default_subnet_ids" {
   description = "IDs of the default VPC's subnets"
   value       = data.aws_subnets.default.ids
 }
+
+output "rds_endpoint" {
+  description = "RDS PostgreSQL connection endpoint (host:port)"
+  value       = aws_db_instance.telemetry.endpoint
+}
+
+output "rds_address" {
+  description = "RDS PostgreSQL host address only"
+  value       = aws_db_instance.telemetry.address
+}
+
+output "secrets_manager_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding DB credentials"
+  value       = aws_secretsmanager_secret.db_credentials.arn
+}
