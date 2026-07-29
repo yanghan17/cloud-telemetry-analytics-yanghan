@@ -1,4 +1,19 @@
 pandas
 numpy
-boto3  
+boto3
 pyarrow
+pyspark==3.5.3
+delta-spark==3.2.0
+psycopg2-binary
+sqlalchemy
+deltalake
+
+# Data science / analysis notebook
+matplotlib
+jupyterlab
+ipykernel
+nbconvert
+
+# Anomaly detection
+scikit-learn
+joblib
