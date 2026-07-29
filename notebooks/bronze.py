@@ -41,6 +41,12 @@ def build_spark_session() -> SparkSession:
         # Local dev only needs 1 shuffle partition worth of parallelism at this data size;
         # Spark's default of 200 would create excessive tiny output files for ~20K rows.
         .config("spark.sql.shuffle.partitions", "4")
+        # Windows sometimes resolves the machine hostname to an IP Spark's
+        # internal driver<->executor networking can't bind to, causing
+        # BlockManagerId/NullPointerException loops. Forcing localhost
+        # fixes this for single-machine local runs.
+        .config("spark.driver.host", "127.0.0.1")
+        .config("spark.driver.bindAddress", "127.0.0.1")
     )
     return configure_spark_with_delta_pip(builder).getOrCreate()
 
