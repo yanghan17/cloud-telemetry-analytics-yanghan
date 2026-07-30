@@ -1,3 +1,23 @@
+# ------------------------------------------------------------------
+# Databricks -- deliberately NOT provisioned here
+# ------------------------------------------------------------------
+# The brief lists "Databricks Workspace / Resources" as a minimum Terraform
+# resource. This project uses Databricks Free Edition instead, and Free Edition
+# is a Databricks-hosted, multi-tenant SaaS workspace provisioned by signing up
+# at databricks.com -- it does not run inside this (or any) AWS account, has no
+# account-level API, and is not something the `databricks` Terraform provider's
+# `databricks_mws_workspaces` resource can create or manage (that resource
+# deploys a workspace INTO your own AWS account on a paid E2 plan, which this
+# project's budget doesn't call for).
+#
+# What WOULD change on a paid plan: this file would gain a `databricks_mws_workspaces`
+# resource (plus the VPC/subnet/cross-account IAM role it requires), and
+# notebooks/databricks/*.py would read directly from `s3a://<bucket>/raw/` via an
+# instance profile instead of from a Unity Catalog Volume -- see
+# notebooks/databricks/01_bronze.py's docstring for exactly what would change.
+# Nothing about the Bronze/Silver/Gold transformation logic itself would differ
+# either way; only how the input path is read.
+
 terraform {
   required_version = ">= 1.5"
   required_providers {
