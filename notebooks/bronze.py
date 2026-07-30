@@ -57,10 +57,16 @@ def build_bronze(df):
     notebook version (notebooks/databricks/01_bronze.py) can import and call it
     directly against the same input read a different way (Unity Catalog Volume
     instead of a local mirror), rather than duplicating this logic.
+
+    Uses the `_metadata.file_path` column rather than `input_file_name()` --
+    both resolve to the same lineage information, but `input_file_name()` is
+    blocked outright on Databricks/Unity Catalog ("UC_COMMAND_NOT_SUPPORTED"),
+    while `_metadata` is a standard Spark 3.2+ file-source column that works
+    identically locally and on Databricks.
     """
     return (
         df
-        .withColumn("_source_file", F.input_file_name())
+        .withColumn("_source_file", F.col("_metadata.file_path"))
         .withColumn("_ingested_at", F.current_timestamp())
     )
 
