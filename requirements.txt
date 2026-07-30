@@ -17,3 +17,9 @@ nbconvert
 # Anomaly detection
 scikit-learn
 joblib
+
+# Dashboard
+streamlit
+
+# Tests
+pytest
