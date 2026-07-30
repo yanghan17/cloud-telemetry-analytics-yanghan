@@ -51,6 +51,20 @@ def build_spark_session() -> SparkSession:
     return configure_spark_with_delta_pip(builder).getOrCreate()
 
 
+def build_bronze(df):
+    """
+    The actual Bronze transformation, factored out of main() so the Databricks
+    notebook version (notebooks/databricks/01_bronze.py) can import and call it
+    directly against the same input read a different way (Unity Catalog Volume
+    instead of a local mirror), rather than duplicating this logic.
+    """
+    return (
+        df
+        .withColumn("_source_file", F.input_file_name())
+        .withColumn("_ingested_at", F.current_timestamp())
+    )
+
+
 def main():
     if not os.path.exists(RAW_INPUT_PATH):
         raise FileNotFoundError(
@@ -76,11 +90,7 @@ def main():
     print(f"Read {row_count:,} raw rows across {df.select('server_id').distinct().count()} servers.")
 
     # Lineage / audit columns -- Bronze's job is traceability, not cleaning.
-    bronze_df = (
-        df
-        .withColumn("_source_file", F.input_file_name())
-        .withColumn("_ingested_at", F.current_timestamp())
-    )
+    bronze_df = build_bronze(df)
 
     print(f"Writing Bronze Delta table to {BRONZE_OUTPUT_PATH} ...")
     (

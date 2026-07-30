@@ -15,6 +15,22 @@ Design notes (see chat writeup for full reasoning):
   Never hardcode secrets here.
 - Supports --dry-run to write to a local folder instead of real S3,
   useful before your AWS account/credentials are ready.
+- `server_id` is dropped from each partition file before writing, same as `dt` --
+  both are already encoded in the Hive-style partition folder name
+  (server_id=X/dt=Y/), and Bronze re-derives them from that folder name via
+  partition discovery. Storing them again inside the file is redundant, and
+  was previously causing Spark to warn `COLUMN_ALREADY_EXISTS` on read.
+- Each partition file gets a unique, content-independent filename rather than a
+  fixed "telemetry.parquet" -- a fixed name means a second write to the same
+  partition silently overwrites the first, which is exactly what happened when
+  testing this pipeline with data containing inconsistent server_id casing:
+  "server_id=SERVER02" and "server_id=server02" resolve to the SAME physical
+  folder on a case-insensitive filesystem (Windows/NTFS, macOS default), so the
+  second write clobbered the first and 5 rows vanished before Bronze ever saw
+  them. Bronze is meant to be an append-only, faithful copy of raw data --
+  silently losing rows to a filename collision defeats that. Deduplication is
+  Silver's job (see silver.py), not something ingest.py should do by accident
+  via overwrites.
 
 Usage:
     # Dry run (no AWS account needed yet)
@@ -30,6 +46,7 @@ import argparse
 import io
 import os
 import sys
+import uuid
 from pathlib import Path
 
 import pandas as pd
@@ -51,8 +68,17 @@ def build_partitions(df: pd.DataFrame):
     df["dt"] = df["timestamp"].dt.strftime("%Y-%m-%d")
 
     for (server_id, dt), group in df.groupby(["server_id", "dt"]):
-        partition_df = group.drop(columns=["dt"]).reset_index(drop=True)
+        # Drop both -- they're already encoded in the partition folder name that the
+        # caller writes this group to (see module docstring).
+        partition_df = group.drop(columns=["dt", "server_id"]).reset_index(drop=True)
         yield server_id, dt, partition_df
+
+
+def partition_filename() -> str:
+    """A unique filename per partition write -- see module docstring for why a fixed
+    filename is unsafe (it can silently overwrite an earlier write to what a
+    case-insensitive filesystem treats as the same folder)."""
+    return f"telemetry_{uuid.uuid4().hex[:12]}.parquet"
 
 
 def to_parquet_bytes(partition_df: pd.DataFrame) -> bytes:
@@ -63,7 +89,7 @@ def to_parquet_bytes(partition_df: pd.DataFrame) -> bytes:
 
 
 def upload_dry_run(server_id: str, dt: str, body: bytes, row_count: int, local_root: str):
-    key_path = Path(local_root) / f"server_id={server_id}" / f"dt={dt}" / "telemetry.parquet"
+    key_path = Path(local_root) / f"server_id={server_id}" / f"dt={dt}" / partition_filename()
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.write_bytes(body)
     print(f"[dry-run] wrote {key_path} ({row_count} records, {len(body):,} bytes)")
@@ -75,7 +101,7 @@ def upload_s3(server_id: str, dt: str, body: bytes, row_count: int, bucket: str,
         sys.exit(1)
 
     s3 = boto3.client("s3")  # credentials picked up from env / AWS CLI config
-    key = f"{prefix}/server_id={server_id}/dt={dt}/telemetry.parquet"
+    key = f"{prefix}/server_id={server_id}/dt={dt}/{partition_filename()}"
     try:
         s3.put_object(Bucket=bucket, Key=key, Body=body)
         print(f"[s3] uploaded s3://{bucket}/{key} ({row_count} records, {len(body):,} bytes)")

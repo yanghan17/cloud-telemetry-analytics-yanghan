@@ -14,6 +14,19 @@ Silver responsibilities (per assessment spec):
 - Reject CPU values above 100% (and other impossible percentages)
 - Reject negative telemetry values
 
+Step order: cast types -> standardize strings -> deduplicate -> validate -> split.
+------------------------------------------------------------------------------------
+This used to run deduplicate -> standardize -- fixed after
+telemetry-generator/generate_telemetry.py's `inject_data_quality_issues` added a
+"case_variant_duplicate" test case and caught a real bug: a reading with server_id
+"SERVER02" and the same reading with server_id "server02" (same timestamp) look like
+two *different* servers to `dropDuplicates` before standardization runs, so both
+survived deduplication as distinct rows. Only afterward, once `.trim().lower()`
+normalized both to "server02", did they become true duplicates -- but by then Silver
+had already committed to keeping both, so Gold and Postgres would have silently
+double-counted that one reading. Standardizing first means dedup always compares
+already-canonical keys, so this class of duplicate can't slip through.
+
 Usage:
     python silver.py
 """
@@ -50,27 +63,14 @@ def build_spark_session() -> SparkSession:
     return configure_spark_with_delta_pip(builder).getOrCreate()
 
 
-def main():
-    spark = build_spark_session()
-    spark.sparkContext.setLogLevel("WARN")
-
-    print(f"Reading Bronze from {BRONZE_PATH} ...")
-    df = spark.read.format("delta").load(BRONZE_PATH)
-    bronze_count = df.count()
-    print(f"Bronze row count: {bronze_count:,}")
-
-    # --- 1. Deduplicate on business key, not full row ---
-    # Keeps the first occurrence per (server_id, timestamp); drops the rest.
-    df = df.dropDuplicates(["server_id", "timestamp"])
-
-    # --- 2. Standardize hostname / server_id ---
-    df = (
-        df
-        .withColumn("hostname", F.trim(F.lower(F.col("hostname"))))
-        .withColumn("server_id", F.trim(F.lower(F.col("server_id"))))
-    )
-
-    # --- 3. Correct / enforce data types explicitly ---
+def clean_and_validate(df, min_valid_timestamp: datetime = MIN_VALID_TIMESTAMP):
+    """
+    The actual Silver transformation, factored out of main() so it can be unit
+    tested against a small, hand-built DataFrame (see tests/test_silver.py) without
+    needing Bronze, S3, or a full pipeline run. Takes a Bronze-shaped DataFrame,
+    returns (valid_df, rejected_df).
+    """
+    # --- 1. Correct / enforce data types explicitly (before anything compares values) ---
     df = (
         df
         .withColumn("timestamp", F.col("timestamp").cast(TimestampType()))
@@ -86,6 +86,17 @@ def main():
         .withColumn("status", F.col("status").cast(StringType()))
     )
 
+    # --- 2. Standardize hostname / server_id BEFORE deduplicating (see module docstring) ---
+    df = (
+        df
+        .withColumn("hostname", F.trim(F.lower(F.col("hostname"))))
+        .withColumn("server_id", F.trim(F.lower(F.col("server_id"))))
+    )
+
+    # --- 3. Deduplicate on the now-canonical business key, not full row ---
+    # Keeps the first occurrence per (server_id, timestamp); drops the rest.
+    df = df.dropDuplicates(["server_id", "timestamp"])
+
     # --- 4. Build validity flags (each rule named, so rejects are explainable) ---
     validity_checks = {
         "missing_required_field": (
@@ -93,7 +104,7 @@ def main():
         ),
         "invalid_timestamp": (
             F.col("timestamp").isNull()
-            | (F.col("timestamp") < F.lit(MIN_VALID_TIMESTAMP))
+            | (F.col("timestamp") < F.lit(min_valid_timestamp))
             | (F.col("timestamp") > F.current_timestamp())
         ),
         "cpu_out_of_range": (
@@ -127,6 +138,19 @@ def main():
 
     valid_df = df.filter(F.col("_reject_reason").isNull()).drop("_reject_reason")
     rejected_df = df.filter(F.col("_reject_reason").isNotNull())
+    return valid_df, rejected_df
+
+
+def main():
+    spark = build_spark_session()
+    spark.sparkContext.setLogLevel("WARN")
+
+    print(f"Reading Bronze from {BRONZE_PATH} ...")
+    df = spark.read.format("delta").load(BRONZE_PATH)
+    bronze_count = df.count()
+    print(f"Bronze row count: {bronze_count:,}")
+
+    valid_df, rejected_df = clean_and_validate(df)
 
     valid_count = valid_df.count()
     rejected_count = rejected_df.count()
