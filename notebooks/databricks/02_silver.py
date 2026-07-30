@@ -12,19 +12,24 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("repo_path", "/Workspace/Repos/you/cloud-telemetry-analytics-yanghan", "Cloned repo path")
+dbutils.widgets.text("repo_path", "/Workspace/Users/yteh0009@zohomail.com/cloud-telemetry-analytics-yanghan", "Cloned repo path")
 dbutils.widgets.text("bronze_table", "telemetry_bronze", "Bronze managed table name")
 dbutils.widgets.text("silver_table", "telemetry_silver", "Silver managed table name")
 dbutils.widgets.text("rejects_table", "telemetry_rejects", "Rejects managed table name")
+
+# Widgets survive a Python restart; plain variables don't -- restarting here (once,
+# before anything imports notebooks/silver.py) guarantees sys.path.append below is
+# picked up on serverless compute, without needing a second manual "Run All".
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+import sys
 
 REPO_PATH = dbutils.widgets.get("repo_path")
 BRONZE_TABLE = dbutils.widgets.get("bronze_table")
 SILVER_TABLE = dbutils.widgets.get("silver_table")
 REJECTS_TABLE = dbutils.widgets.get("rejects_table")
-
-# COMMAND ----------
-
-import sys
 
 sys.path.append(f"{REPO_PATH}/notebooks")
 from silver import clean_and_validate  # noqa: E402
