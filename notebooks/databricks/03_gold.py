@@ -49,7 +49,13 @@ summary_df = build_server_summary(df)
 display(summary_df.orderBy(F.desc("anomaly_count")))
 
 print(f"Writing to table {GOLD_SUMMARY_TABLE} ...")
-summary_df.write.format("delta").mode("overwrite").saveAsTable(GOLD_SUMMARY_TABLE)
+(
+    summary_df.write
+    .format("delta")
+    .mode("overwrite")
+    .option("overwriteSchema", "true")
+    .saveAsTable(GOLD_SUMMARY_TABLE)
+)
 
 # COMMAND ----------
 
@@ -62,6 +68,7 @@ print(f"Writing to table {GOLD_DAILY_TABLE} ...")
     daily_df.write
     .format("delta")
     .mode("overwrite")
+    .option("overwriteSchema", "true")
     .partitionBy("server_id")
     .saveAsTable(GOLD_DAILY_TABLE)
 )

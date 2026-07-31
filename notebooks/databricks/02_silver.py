@@ -59,11 +59,24 @@ if rejected_count > 0:
 # COMMAND ----------
 
 print(f"Writing Silver managed table {SILVER_TABLE} ...")
-valid_df.write.format("delta").mode("overwrite").partitionBy("server_id").saveAsTable(SILVER_TABLE)
+(
+    valid_df.write
+    .format("delta")
+    .mode("overwrite")
+    .option("overwriteSchema", "true")
+    .partitionBy("server_id")
+    .saveAsTable(SILVER_TABLE)
+)
 
 if rejected_count > 0:
     print(f"Writing rejects table {REJECTS_TABLE} ...")
-    rejected_df.write.format("delta").mode("overwrite").saveAsTable(REJECTS_TABLE)
+    (
+        rejected_df.write
+        .format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .saveAsTable(REJECTS_TABLE)
+    )
 
 print(f"\nSilver layer complete. {valid_count:,}/{bronze_count:,} rows passed validation "
       f"({100 * valid_count / bronze_count:.1f}%).")

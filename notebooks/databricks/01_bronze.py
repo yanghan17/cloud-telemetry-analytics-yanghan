@@ -70,10 +70,13 @@ print(f"Read {row_count:,} raw rows across {df.select('server_id').distinct().co
 bronze_df = build_bronze(df)
 
 print(f"Writing Bronze managed table {BRONZE_TABLE} ...")
+# overwriteSchema: UTC-aware Parquet changed the timestamp type vs the previous
+# table; plain overwrite keeps the old schema and fails with DELTA_FAILED_TO_MERGE_FIELDS.
 (
     bronze_df.write
     .format("delta")
     .mode("overwrite")
+    .option("overwriteSchema", "true")
     .partitionBy("server_id")
     .saveAsTable(BRONZE_TABLE)
 )
