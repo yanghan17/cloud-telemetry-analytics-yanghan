@@ -34,7 +34,7 @@ ordering bug this exposed and fixed.
 
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from telemetry_model import build_servers, generate_baseline, derive_status
 
@@ -46,7 +46,12 @@ RANDOM_SEED = 42
 NUM_SERVERS = 10
 NUM_DAYS = 7
 INTERVAL_MINUTES = 5
-START_TIME = datetime(2026, 7, 13, 0, 0, 0)  # a Monday, 7 days before "now"
+# Explicitly UTC -- naive datetimes previously got interpreted as the Spark
+# session's local timezone on read, shifting every timestamp by the machine offset
+# (UTC+8 here → earliest reading landed at 2026-07-12 16:00 UTC). Pinning UTC
+# here and `spark.sql.session.timeZone=UTC` in the lakehouse jobs keeps the
+# stored instants identical to the generator's intended wall-clock.
+START_TIME = datetime(2026, 7, 13, 0, 0, 0, tzinfo=timezone.utc)
 
 OUTPUT_PATH = "../data/telemetry_raw.csv"
 
@@ -215,10 +220,10 @@ def inject_data_quality_issues(df: pd.DataFrame, rng: np.random.Generator) -> tu
         missing_rows.iloc[i, missing_rows.columns.get_loc(col)] = np.nan
     summary.append(("missing_value", len(missing_rows)))
 
-    # 4. Out-of-bounds timestamps.
+    # 4. Out-of-bounds timestamps (UTC-aware, matching the clean rows).
     bad_ts_rows = templates.iloc[20:25].copy().reset_index(drop=True)
-    bad_ts_rows.loc[bad_ts_rows.index[:2], "timestamp"] = pd.Timestamp("2019-01-01")
-    bad_ts_rows.loc[bad_ts_rows.index[2:], "timestamp"] = pd.Timestamp("2099-01-01")
+    bad_ts_rows.loc[bad_ts_rows.index[:2], "timestamp"] = pd.Timestamp("2019-01-01", tz="UTC")
+    bad_ts_rows.loc[bad_ts_rows.index[2:], "timestamp"] = pd.Timestamp("2099-01-01", tz="UTC")
     summary.append(("out_of_bounds_timestamp", len(bad_ts_rows)))
 
     # 5. CPU over 100%.

@@ -38,6 +38,7 @@ from pyspark.sql import functions as F
 # COMMAND ----------
 
 print(f"Reading Silver from table {SILVER_TABLE} ...")
+spark.conf.set("spark.sql.session.timeZone", "UTC")
 df = spark.table(SILVER_TABLE)
 print(f"Silver row count: {df.count():,}")
 

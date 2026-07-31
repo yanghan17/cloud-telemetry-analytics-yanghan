@@ -39,6 +39,7 @@ from pyspark.sql import functions as F
 # COMMAND ----------
 
 print(f"Reading Bronze from table {BRONZE_TABLE} ...")
+spark.conf.set("spark.sql.session.timeZone", "UTC")
 df = spark.table(BRONZE_TABLE)
 bronze_count = df.count()
 print(f"Bronze row count: {bronze_count:,}")
@@ -48,11 +49,11 @@ valid_df, rejected_df = clean_and_validate(df)
 valid_count = valid_df.count()
 rejected_count = rejected_df.count()
 
-print(f"\nValidation results:")
+print("\nValidation results:")
 print(f"  Valid rows:    {valid_count:,}")
 print(f"  Rejected rows: {rejected_count:,}")
 if rejected_count > 0:
-    print(f"\n  Rejection breakdown:")
+    print("\n  Rejection breakdown:")
     rejected_df.groupBy("_reject_reason").count().orderBy(F.desc("count")).show(truncate=False)
 
 # COMMAND ----------

@@ -156,14 +156,14 @@ resource "aws_db_instance" "telemetry" {
   instance_class = "db.t4g.micro" # RDS Free Tier eligible
 
   allocated_storage = 20 # GB, Free Tier eligible
-  storage_type       = "gp3"
-  storage_encrypted  = true
+  storage_type      = "gp3"
+  storage_encrypted = true
 
   db_name  = var.db_name
   username = var.db_username
   password = random_password.db_password.result
 
-  db_subnet_group_name  = aws_db_subnet_group.telemetry.name
+  db_subnet_group_name   = aws_db_subnet_group.telemetry.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = true # restricted to your IP via the security group above
 

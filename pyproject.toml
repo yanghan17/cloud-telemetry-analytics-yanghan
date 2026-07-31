@@ -1,0 +1,27 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+  "data",
+  "venv",
+  ".venv",
+  "docs",
+]
+
+[tool.ruff.lint]
+# Practical CI gate: real bugs + unused imports; skip pedantic style churn.
+select = ["E", "F", "W"]
+ignore = [
+  "E501",  # line length — leave to editors
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Databricks notebooks: runtime injects spark/dbutils/display; imports after
+# dbutils.library.restartPython() and widget setup must stay mid-file.
+"notebooks/databricks/**" = ["F821", "E402"]
+# tests insert sys.path before importing silver
+"tests/**" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

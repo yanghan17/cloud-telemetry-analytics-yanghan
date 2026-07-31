@@ -51,11 +51,11 @@ BRONZE_TABLE = dbutils.widgets.get("bronze_table")
 sys.path.append(f"{REPO_PATH}/notebooks")
 from bronze import build_bronze  # noqa: E402
 
-from pyspark.sql import functions as F
 
 # COMMAND ----------
 
 print(f"Reading raw partitions from {RAW_VOLUME_PATH} ...")
+spark.conf.set("spark.sql.session.timeZone", "UTC")
 df = (
     spark.read
     .option("basePath", RAW_VOLUME_PATH)

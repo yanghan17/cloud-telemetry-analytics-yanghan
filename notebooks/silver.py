@@ -59,6 +59,9 @@ def build_spark_session() -> SparkSession:
         # fixes this for single-machine local runs.
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
+        .config("spark.sql.session.timeZone", "UTC")
+        .config("spark.driver.extraJavaOptions", "-Duser.timezone=UTC")
+        .config("spark.executor.extraJavaOptions", "-Duser.timezone=UTC")
     )
     return configure_spark_with_delta_pip(builder).getOrCreate()
 
@@ -155,11 +158,11 @@ def main():
     valid_count = valid_df.count()
     rejected_count = rejected_df.count()
 
-    print(f"\nValidation results:")
+    print("\nValidation results:")
     print(f"  Valid rows:    {valid_count:,}")
     print(f"  Rejected rows: {rejected_count:,}")
     if rejected_count > 0:
-        print(f"\n  Rejection breakdown:")
+        print("\n  Rejection breakdown:")
         rejected_df.groupBy("_reject_reason").count().orderBy(F.desc("count")).show(truncate=False)
 
     # --- 5. Write Silver (valid rows) ---

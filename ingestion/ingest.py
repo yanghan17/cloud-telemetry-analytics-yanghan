@@ -64,7 +64,9 @@ def build_partitions(df: pd.DataFrame):
     Mirrors Hive-style partitioning: server_id=X/dt=YYYY-MM-DD/
     """
     df = df.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    # Force UTC so partition dates match the generator's intended calendar day,
+    # whether the CSV carried +00:00 or a naive value.
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
     df["dt"] = df["timestamp"].dt.strftime("%Y-%m-%d")
 
     for (server_id, dt), group in df.groupby(["server_id", "dt"]):

@@ -89,7 +89,9 @@ def generate_tick(rng: np.random.Generator, now: datetime) -> pd.DataFrame:
     call any of generate_telemetry.py's anomaly injectors -- those model the six fixed
     historical incidents the ML model is evaluated against; a live tick is meant to
     represent ordinary telemetry continuously arriving, not a scripted incident."""
-    ts_index = pd.DatetimeIndex([pd.Timestamp(now)])
+    # `now` is always timezone-aware UTC from run_one_tick(); keep that on the index
+    # so Parquet/Spark don't re-interpret a naive wall-clock in a local session TZ.
+    ts_index = pd.DatetimeIndex([pd.Timestamp(now).tz_convert("UTC")])
     rows = []
     for server in SERVERS:
         row = generate_baseline(server["server_id"], ts_index, rng)

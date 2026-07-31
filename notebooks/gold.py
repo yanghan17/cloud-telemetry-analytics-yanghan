@@ -50,6 +50,9 @@ def build_spark_session() -> SparkSession:
         .config("spark.sql.shuffle.partitions", "4")
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
+        .config("spark.sql.session.timeZone", "UTC")
+        .config("spark.driver.extraJavaOptions", "-Duser.timezone=UTC")
+        .config("spark.executor.extraJavaOptions", "-Duser.timezone=UTC")
     )
     return configure_spark_with_delta_pip(builder).getOrCreate()
 

@@ -47,6 +47,13 @@ def build_spark_session() -> SparkSession:
         # fixes this for single-machine local runs.
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
+        # Naive / local-session timestamps previously shifted by the OS offset;
+        # keep lakehouse instants identical to the UTC-aware generator output.
+        .config("spark.sql.session.timeZone", "UTC")
+        # Also pin the JVM default TZ so Python `.collect()` / `.first()` datetimes
+        # match UTC (otherwise Asia/Kuala_Lumpur makes midnight UTC print as 08:00).
+        .config("spark.driver.extraJavaOptions", "-Duser.timezone=UTC")
+        .config("spark.executor.extraJavaOptions", "-Duser.timezone=UTC")
     )
     return configure_spark_with_delta_pip(builder).getOrCreate()
 
@@ -108,7 +115,7 @@ def main():
     )
 
     print("Bronze layer complete.")
-    print(f"Schema:")
+    print("Schema:")
     bronze_df.printSchema()
 
     spark.stop()
