@@ -8,43 +8,68 @@ AI tools were used during development. The solution below is what was built and 
 
 ## Architecture
 
-```text
-Telemetry Generator / Live Ingest
-           │
-           ▼
-     Object Storage (S3)
-           │
-           │ Raw telemetry (Parquet, Hive-partitioned)
-           ▼
-    Bronze Delta Table          ←── also runnable on Databricks
-           │                       (Unity Catalog Volume input)
-           │ Clean / validate
-           ▼
-    Silver Delta Table
-           │
-           │ Aggregate
-           ▼
-     Gold Delta Tables
-           │
-     ┌─────┴──────────┐
-     ▼                ▼
-PostgreSQL        Isolation Forest
-(serving layer)   (anomaly events)
-     │                │
-     └───────┬────────┘
-             ▼
-         Streamlit
-          Dashboard
+```mermaid
+flowchart TB
+  subgraph producers ["Data producers"]
+    GEN["telemetry-generator<br/>7-day batch CSV"]
+    LIVE["live_ingest.py<br/>continuous ticks"]
+  end
+
+  subgraph aws ["AWS — Terraform provisioned"]
+    S3["S3 bucket<br/>raw / server_id= / dt=<br/>encrypted · versioned · private"]
+    SM["Secrets Manager<br/>DB credentials"]
+    RDS["RDS PostgreSQL 16<br/>IP-restricted SG"]
+  end
+
+  subgraph lakehouse ["Medallion lakehouse — shared transforms"]
+    direction TB
+    BR["Bronze<br/>raw + lineage"]
+    SI["Silver<br/>clean · validate · quarantine"]
+    GO["Gold<br/>server summary · daily metrics"]
+    BR --> SI --> GO
+  end
+
+  subgraph compute ["Two compute paths — same code"]
+    LOCAL["Local PySpark<br/>data/s3-mirror → data/lakehouse"]
+    DBX["Databricks Free Edition<br/>UC Volume → managed Delta tables"]
+  end
+
+  subgraph serving ["Serving & insight"]
+    ML["Isolation Forest<br/>anomaly events"]
+    NB["Analysis notebook<br/>Silver"]
+    APP["Streamlit dashboard"]
+  end
+
+  GEN --> LIVE
+  GEN --> S3
+  LIVE --> S3
+  S3 -.->|"dry-run / sync"| LOCAL
+  S3 -.->|"manual Volume upload<br/>Free Edition"| DBX
+  LOCAL --> lakehouse
+  DBX --> lakehouse
+  GO --> RDS
+  SI --> ML
+  ML --> RDS
+  SM --> RDS
+  SM --> APP
+  RDS --> APP
+  SI --> NB
+  GO --> NB
 ```
 
-Two execution paths share the same Bronze/Silver/Gold transform logic:
+**How to read it**
 
-| Path | Where compute runs | Raw input | Lakehouse output |
-|------|--------------------|-----------|------------------|
-| **Local** | Laptop PySpark | `data/s3-mirror/raw` (or S3 sync) | `data/lakehouse/*` |
-| **Databricks** | Free Edition serverless | Unity Catalog Volume | Managed Delta tables in Catalog |
+1. Batch and continuous producers write Hive-partitioned Parquet into **S3** (Terraform).
+2. The **same** Bronze → Silver → Gold logic runs locally (PySpark + Delta) and on **Databricks Free Edition** (Volume input → Catalog tables). Free Edition cannot read private S3 from serverless, so raw data is copied into a Unity Catalog Volume once.
+3. **Postgres** is the serving layer (health summary, alerts, ML anomalies). Credentials come from **Secrets Manager**, never from source code.
+4. **Streamlit** reads only Postgres. The **analysis notebook** and **Isolation Forest** read Silver (local Delta); ML events are loaded into Postgres separately.
 
-Postgres, ML, and Streamlit read from the **local** Gold/Silver outputs (and AWS Secrets Manager for DB credentials). Databricks proves the same medallion pipeline runs on the platform.
+| Path | Compute | Raw input | Lakehouse output |
+|------|---------|-----------|------------------|
+| **Local** | Laptop PySpark | `data/s3-mirror/raw` | `data/lakehouse/*` |
+| **Databricks** | Free Edition serverless | Unity Catalog Volume | Managed Delta tables |
+
+Postgres, ML, and Streamlit use the **local** Gold/Silver path. Databricks demonstrates the medallion pipeline on the required platform.
 
 ---
 
