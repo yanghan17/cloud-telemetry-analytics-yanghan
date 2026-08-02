@@ -2,59 +2,64 @@
 
 A small end-to-end cloud telemetry analytics platform: synthetic infrastructure metrics are generated, ingested into AWS S3, processed through a Bronze → Silver → Gold Delta lakehouse (locally with PySpark and on Databricks Free Edition), served into PostgreSQL, scored by an Isolation Forest anomaly detector, analysed in a notebook, and displayed in a Streamlit dashboard.
 
-AI tools were used during development. The solution below is what was built and what should be explainable in review.
-
 ---
 
 ## Architecture
 
+### Simple flow (pipeline path)
+
+```text
+Telemetry Generator / Live Ingest
+           │
+           ▼
+     Object Storage (S3)
+           │
+           │ Raw telemetry (Parquet, Hive-partitioned)
+           ▼
+    Bronze Delta Table          ←── also runnable on Databricks
+           │                       (Unity Catalog Volume input)
+           │ Clean / validate
+           ▼
+    Silver Delta Table
+           │
+           │ Aggregate
+           ▼
+     Gold Delta Tables
+           │
+     ┌─────┴──────────┐
+     ▼                ▼
+PostgreSQL        Isolation Forest
+(serving layer)   (anomaly events)
+     │                │
+     └───────┬────────┘
+             ▼
+         Streamlit
+          Dashboard
+```
+
+### Structured view (components)
+
+GitHub's Mermaid renderer can look different from a local preview (especially with HTML breaks and dense subgraphs). This version stays simple so it renders cleanly on GitHub.
+
 ```mermaid
-flowchart TB
-  subgraph producers ["Data producers"]
-    GEN["telemetry-generator<br/>7-day batch CSV"]
-    LIVE["live_ingest.py<br/>continuous ticks"]
-  end
+flowchart TD
+  GEN[Batch generator] --> S3[S3 raw Parquet]
+  LIVE[Live ingest] --> S3
 
-  subgraph aws ["AWS — Terraform provisioned"]
-    S3["S3 bucket<br/>raw / server_id= / dt=<br/>encrypted · versioned · private"]
-    SM["Secrets Manager<br/>DB credentials"]
-    RDS["RDS PostgreSQL 16<br/>IP-restricted SG"]
-  end
+  S3 --> LOCAL[Local PySpark]
+  S3 -.-> DBX[Databricks Volume]
 
-  subgraph lakehouse ["Medallion lakehouse — shared transforms"]
-    direction TB
-    BR["Bronze<br/>raw + lineage"]
-    SI["Silver<br/>clean · validate · quarantine"]
-    GO["Gold<br/>server summary · daily metrics"]
-    BR --> SI --> GO
-  end
+  LOCAL --> BR[Bronze]
+  DBX --> BR
+  BR --> SI[Silver]
+  SI --> GO[Gold]
 
-  subgraph compute ["Two compute paths — same code"]
-    LOCAL["Local PySpark<br/>data/s3-mirror → data/lakehouse"]
-    DBX["Databricks Free Edition<br/>UC Volume → managed Delta tables"]
-  end
-
-  subgraph serving ["Serving & insight"]
-    ML["Isolation Forest<br/>anomaly events"]
-    NB["Analysis notebook<br/>Silver"]
-    APP["Streamlit dashboard"]
-  end
-
-  GEN --> LIVE
-  GEN --> S3
-  LIVE --> S3
-  S3 -.->|"dry-run / sync"| LOCAL
-  S3 -.->|"manual Volume upload<br/>Free Edition"| DBX
-  LOCAL --> lakehouse
-  DBX --> lakehouse
-  GO --> RDS
-  SI --> ML
+  GO --> RDS[RDS Postgres]
+  SI --> ML[Isolation Forest]
   ML --> RDS
-  SM --> RDS
-  SM --> APP
-  RDS --> APP
-  SI --> NB
-  GO --> NB
+  SI --> NB[Analysis notebook]
+  SM[Secrets Manager] --> RDS
+  RDS --> APP[Streamlit]
 ```
 
 **How to read it**
@@ -73,22 +78,28 @@ Postgres, ML, and Streamlit use the **local** Gold/Silver path. Databricks demon
 
 ---
 
+
+
 ## Technologies
 
-| Layer | Choice |
-|-------|--------|
-| Cloud | AWS (`ap-southeast-1`) |
-| IaC | Terraform |
+
+| Layer          | Choice                                           |
+| -------------- | ------------------------------------------------ |
+| Cloud          | AWS (`ap-southeast-1`)                           |
+| IaC            | Terraform                                        |
 | Object storage | S3 (versioned, encrypted, public access blocked) |
-| Lakehouse | Delta Lake + PySpark; Databricks Free Edition |
-| Database | Amazon RDS PostgreSQL 16 |
-| Secrets | AWS Secrets Manager |
-| Data science | Pandas, Matplotlib, Jupyter |
-| ML | Scikit-learn Isolation Forest |
-| Dashboard | Streamlit |
-| Source control | GitHub |
+| Lakehouse      | Delta Lake + PySpark; Databricks Free Edition    |
+| Database       | Amazon RDS PostgreSQL 16                         |
+| Secrets        | AWS Secrets Manager                              |
+| Data science   | Pandas, Matplotlib, Jupyter                      |
+| ML             | Scikit-learn Isolation Forest                    |
+| Dashboard      | Streamlit                                        |
+| Source control | GitHub                                           |
+
 
 ---
+
+
 
 ## Repository layout
 
@@ -112,6 +123,8 @@ cloud-telemetry-analytics-yanghan/
 
 ---
 
+
+
 ## Prerequisites
 
 - Python 3.11+
@@ -128,6 +141,8 @@ pip install -r requirements.txt
 ```
 
 ---
+
+
 
 ## 1. Deploy cloud infrastructure (Terraform)
 
@@ -166,6 +181,8 @@ $env:TELEMETRY_DB_SECRET_NAME = "cloud-telemetry/db-credentials"
 
 ---
 
+
+
 ## 2. Generate telemetry
 
 ```bash
@@ -185,7 +202,11 @@ Shared generation logic lives in `telemetry_model.py` (also used by continuous i
 
 ---
 
+
+
 ## 3. Ingest telemetry
+
+
 
 ### Batch (historical week)
 
@@ -215,6 +236,8 @@ Satisfies “telemetry can continuously enter the platform” without changing t
 
 ---
 
+
+
 ## 4. Lakehouse (local)
 
 Run each script from `notebooks/` (paths are relative to that directory):
@@ -232,21 +255,25 @@ Expected Silver outcome with current generator:
 - Silver valid: **20,160**  
 - Rejected: **29** (named reasons in `telemetry_rejects`)
 
+
+
 ### Databricks Free Edition
 
 1. Clone this repo under **Workspace → Repos**.
-2. Create a Unity Catalog Volume; upload the contents of `data/s3-mirror/raw/` so paths look like  
-   `/Volumes/workspace/default/telemetry/raw/server_id=.../dt=.../`.
+2. Create a Unity Catalog Volume; upload the contents of `data/s3-mirror/raw/` so paths look like
+  `/Volumes/workspace/default/telemetry/raw/server_id=.../dt=.../`.
 3. Open and **Run All**, in order:
-   - `notebooks/databricks/01_bronze.py`
-   - `notebooks/databricks/02_silver.py`
-   - `notebooks/databricks/03_gold.py`
+  - `notebooks/databricks/01_bronze.py`
+  - `notebooks/databricks/02_silver.py`
+  - `notebooks/databricks/03_gold.py`
 4. Set widget `repo_path` to your clone path (e.g. `/Workspace/Users/<you>/cloud-telemetry-analytics-yanghan`).
 5. Tables appear in Catalog: `telemetry_bronze`, `telemetry_silver`, `telemetry_rejects`, `telemetry_gold_*`.
 
 Free Edition cannot attach an IAM instance profile to serverless compute, so Bronze reads the Volume copy of raw data rather than `s3a://` live. On a paid workspace with an instance profile, only the input path would change; the transforms stay the same.
 
 ---
+
+
 
 ## 5. PostgreSQL serving layer
 
@@ -272,6 +299,8 @@ Credentials are fetched from Secrets Manager at runtime — never hardcoded.
 
 ---
 
+
+
 ## 6. Data analysis notebook
 
 ```bash
@@ -282,6 +311,8 @@ jupyter lab telemetry_analysis.ipynb
 Answers the assessment questions on **Silver** (not Bronze/Gold): highest CPU, errors, gradual memory/disk growth, unusual network, CPU vs response time, anomaly ranking, time-of-day patterns. Findings are written in the notebook markdown cells.
 
 ---
+
+
 
 ## 7. Anomaly detection
 
@@ -298,10 +329,12 @@ python anomaly_detection.py
 
 **Against injected ground truth** (same week):
 
-| Detector | Precision | Recall | F1 |
-|----------|-----------|--------|-----|
-| Rule-based `status` thresholds | 1.00 | 0.16 | 0.27 |
-| Isolation Forest | 0.66 | 0.69 | 0.67 |
+
+| Detector                       | Precision | Recall | F1   |
+| ------------------------------ | --------- | ------ | ---- |
+| Rule-based `status` thresholds | 1.00      | 0.16   | 0.27 |
+| Isolation Forest               | 0.66      | 0.69   | 0.67 |
+
 
 Outputs:
 
@@ -310,6 +343,8 @@ Outputs:
 - `ml/model/isolation_forest.joblib` — model + scalers (gitignored)
 
 ---
+
+
 
 ## 8. Streamlit dashboard
 
@@ -324,20 +359,24 @@ If connection fails: check RDS is up, your public IP still matches `allowed_ip_c
 
 ---
 
+
+
 ## Data flow (end-to-end)
 
-1. `generate_telemetry.py` → CSV  
-2. `ingest.py` / `live_ingest.py` → S3 (and/or local mirror)  
-3. `bronze.py` → raw Delta + lineage columns  
-4. `silver.py` → validated Delta; rejects quarantined  
-5. `gold.py` → server summary + daily metrics  
-6. `load_to_postgres.py` → serving tables + alerts  
-7. `anomaly_detection.py` → events → `load_anomalies_to_postgres.py`  
-8. `streamlit_app.py` → operators  
+1. `generate_telemetry.py` → CSV
+2. `ingest.py` / `live_ingest.py` → S3 (and/or local mirror)
+3. `bronze.py` → raw Delta + lineage columns
+4. `silver.py` → validated Delta; rejects quarantined
+5. `gold.py` → server summary + daily metrics
+6. `load_to_postgres.py` → serving tables + alerts
+7. `anomaly_detection.py` → events → `load_anomalies_to_postgres.py`
+8. `streamlit_app.py` → operators
 
 Databricks path: same transforms, Volume input, Catalog tables output (parallel demonstration of the lakehouse on Databricks).
 
 ---
+
+
 
 ## Security considerations
 
@@ -353,6 +392,8 @@ Databricks path: same transforms, Volume input, Catalog tables output (parallel 
   - `allowed_ip_cidr` in `terraform.tfvars` must stay out of git.
 
 ---
+
+
 
 ## Tests
 
@@ -371,21 +412,27 @@ ruff check app database ingestion ml notebooks telemetry-generator tests
 
 ---
 
+
+
 ## CI / DevSecOps (GitHub Actions)
 
-On every push and pull request to `master`/`main`, [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs:
+On every push and pull request to `master`/`main`, `[.github/workflows/ci.yml](.github/workflows/ci.yml)` runs:
 
-| Job | What it does |
-|-----|----------------|
-| **Python lint** | Ruff (`pyproject.toml`) |
-| **Unit tests** | `pytest` with Java 17 for PySpark |
-| **Dependency scan** | `pip-audit` against `requirements.txt` |
-| **Secret scan** | Gitleaks (full git history) |
+
+| Job                      | What it does                                              |
+| ------------------------ | --------------------------------------------------------- |
+| **Python lint**          | Ruff (`pyproject.toml`)                                   |
+| **Unit tests**           | `pytest` with Java 17 for PySpark                         |
+| **Dependency scan**      | `pip-audit` against `requirements.txt`                    |
+| **Secret scan**          | Gitleaks (full git history)                               |
 | **Terraform validation** | `terraform fmt -check`, `init -backend=false`, `validate` |
+
 
 No cloud credentials are required; Terraform does not plan/apply in CI. Deployment stays manual (`terraform apply` locally).
 
 ---
+
+
 
 ## Problems encountered
 
@@ -400,6 +447,8 @@ No cloud credentials are required; Terraform does not plan/apply in CI. Deployme
 
 ---
 
+
+
 ## What I would improve with more time
 
 - Extend `derive_status()` to network and response time (currently structurally blind to two injected scenarios).
@@ -410,6 +459,8 @@ No cloud credentials are required; Terraform does not plan/apply in CI. Deployme
 - Wire response time to CPU in the generator so the correlation question has a real signal.
 
 ---
+
+
 
 ## Quick start (local, after Terraform apply)
 
@@ -432,3 +483,4 @@ Destroy cloud resources when finished:
 cd terraform
 terraform destroy
 ```
+
